@@ -1,0 +1,24 @@
+# Biometric-Attendance — Phase 1 (offline Windows app)
+# Python 3.14 / ONNX vision stack (TensorFlow has no 3.14 wheels, so no DeepFace)
+
+# GUI
+customtkinter==5.2.2
+
+# Imaging / camera
+pillow>=11,<13
+
+# Face detection + landmarks (blink / head-turn liveness challenge)
+mediapipe==0.10.35
+
+# Face recognition (ArcFace via ONNX) + ONNX runtime for recognition & anti-spoof
+insightface==1.0.1
+onnxruntime>=1.27,<2
+
+# Numerics
+numpy>=2,<3
+
+# Admin password hashing
+bcrypt>=4,<5
+
+# Excel export
+openpyxl>=3.1,<4

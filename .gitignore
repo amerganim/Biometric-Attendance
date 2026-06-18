@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Biometric-Attendance (local runtime data; never commit) ---
+data/attendance.db
+data/attendance.db-wal
+data/attendance.db-shm
+data/thumbnails/
+data/models/
+data/logs/
+
+# Claude Code local settings (machine-specific)
+.claude/
