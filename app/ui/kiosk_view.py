@@ -5,14 +5,16 @@ shared with a background worker thread that runs the heavy recognition + livenes
 pipeline, so the live preview never stutters. The worker drives a small state
 machine and pushes all UI updates back to the main thread via ``after``.
 
-States:
-    SCANNING  -> look for a live, recognized face
-    CHALLENGE -> ask the recognized teacher to blink / turn (active liveness)
-    RESULT    -> show the saved check-in/out for a few seconds, then cooldown
+Flow shown to the user:
+    1. Step up            -> "Step up to mark attendance"
+    2. Recognized         -> "Hi <name> — please blink to confirm"
+    3. Liveness verified  -> record attendance
+    4. Done               -> "Attendance recorded · Checked IN · 09:05 AM"
 """
 from __future__ import annotations
 
 import enum
+import logging
 import threading
 import time
 from datetime import datetime
@@ -24,23 +26,24 @@ from app.core.liveness import ActiveChallenge
 from app.db.repositories import SettingsRepository
 from app.ui._widgets import bgr_to_ctk_image, placeholder_image
 
-PREVIEW_SIZE = (820, 615)
-CHALLENGE_TIMEOUT_S = 9.0
-RESULT_HOLD_S = 3.5
-SCAN_INTERVAL_S = 0.25
+log = logging.getLogger(__name__)
 
-# Banner colors (background, text).
+PREVIEW_SIZE = (720, 405)
+CHALLENGE_TIMEOUT_S = 12.0
+RESULT_HOLD_S = 4.0
+SCAN_INTERVAL_S = 0.2
+
+# Status card colors (background, primary-text).
 _COLORS = {
-    "idle": ("#1f2630", "#9aa4b2"),
-    "info": ("#2a3a52", "#cfe0ff"),
+    "idle": ("#1f2630", "#d6dee9"),
+    "info": ("#22344f", "#cfe0ff"),
     "warn": ("#4a3a1f", "#ffe0a3"),
     "bad": ("#4a2222", "#ffb3b3"),
-    "good": ("#1f4a2a", "#b3ffc4"),
+    "good": ("#15401f", "#b6ffc6"),
 }
 
 
 class _State(enum.Enum):
-    LOADING = "loading"
     SCANNING = "scanning"
     CHALLENGE = "challenge"
     RESULT = "result"
@@ -60,25 +63,28 @@ class KioskView(ctk.CTkFrame):
 
         # Top bar.
         top = ctk.CTkFrame(self, fg_color="transparent")
-        top.pack(fill="x", padx=20, pady=(14, 0))
-        ctk.CTkLabel(top, text="Attendance Station", font=("", 20, "bold")).pack(side="left")
-        self.clock = ctk.CTkLabel(top, text="", font=("", 16))
-        self.clock.pack(side="left", padx=20)
+        top.pack(fill="x", padx=24, pady=(14, 0))
+        ctk.CTkLabel(top, text="📷  Attendance Station",
+                     font=("", 20, "bold")).pack(side="left")
+        self.clock = ctk.CTkLabel(top, text="", font=("", 15), text_color="gray70")
+        self.clock.pack(side="left", padx=18)
         ctk.CTkButton(top, text="Admin", width=90, fg_color="transparent",
                       border_width=1, command=app.show_login).pack(side="right")
 
-        # Status banner.
-        self.banner = ctk.CTkFrame(self, height=80, corner_radius=12)
-        self.banner.pack(fill="x", padx=20, pady=12)
-        self.banner.pack_propagate(False)
-        self.banner_text = ctk.CTkLabel(self.banner, text="Starting…", font=("", 26, "bold"))
-        self.banner_text.pack(expand=True)
+        # Status card (two lines: primary + secondary).
+        self.card = ctk.CTkFrame(self, height=140, corner_radius=16)
+        self.card.pack(fill="x", padx=24, pady=14)
+        self.card.pack_propagate(False)
+        self.primary = ctk.CTkLabel(self.card, text="Starting…", font=("", 30, "bold"))
+        self.primary.pack(expand=True, pady=(22, 0))
+        self.secondary = ctk.CTkLabel(self.card, text="", font=("", 16))
+        self.secondary.pack(expand=True, pady=(0, 20))
 
         # Camera preview.
         self.preview = ctk.CTkLabel(self, text="", image=placeholder_image(PREVIEW_SIZE))
-        self.preview.pack(pady=(0, 16))
+        self.preview.pack(pady=(0, 14))
 
-        self._set_banner("Starting…", "idle")
+        self._show("Starting…", "Please wait", "idle")
         self._update_clock()
 
     # ------------------------------------------------------------------
@@ -86,7 +92,7 @@ class KioskView(ctk.CTkFrame):
     # ------------------------------------------------------------------
     def on_show(self) -> None:
         if not self.app.camera.start():
-            self._set_banner("Camera unavailable — check the webcam", "bad")
+            self._show("Camera unavailable", "Check that the webcam is connected", "bad")
             return
         self._stop.clear()
         self._tick()
@@ -115,7 +121,7 @@ class KioskView(ctk.CTkFrame):
         self._preview_job = self.after(33, self._tick)
 
     def _update_clock(self) -> None:
-        self.clock.configure(text=datetime.now().strftime("%a %d %b  %H:%M:%S"))
+        self.clock.configure(text=datetime.now().strftime("%a %d %b · %I:%M:%S %p"))
         self.after(1000, self._update_clock)
 
     def _snapshot(self):
@@ -129,30 +135,33 @@ class KioskView(ctk.CTkFrame):
         except RuntimeError:
             pass  # window closing
 
-    def _set_banner(self, text: str, kind: str) -> None:
+    def _show(self, primary: str, secondary: str, kind: str) -> None:
         bg, fg = _COLORS[kind]
-        self.banner.configure(fg_color=bg)
-        self.banner_text.configure(text=text, text_color=fg)
+        self.card.configure(fg_color=bg)
+        self.primary.configure(text=primary, text_color=fg)
+        self.secondary.configure(text=secondary, text_color=fg)
 
     # ------------------------------------------------------------------
     # Worker thread: recognition + liveness state machine
     # ------------------------------------------------------------------
     def _run_worker(self) -> None:
-        self._ui(self._set_banner, "Loading face models…", "info")
+        self._ui(self._show, "Please wait", "Loading face recognition…", "info")
         try:
             self.service = AttendanceService()
-            # Warm up the model so the first real scan is fast.
             frame = self._wait_for_frame()
             if frame is not None:
-                self.service.identify(frame)
-        except Exception:  # pragma: no cover
-            self._ui(self._set_banner, "Failed to load face models", "bad")
+                self.service.identify(frame)  # warm up so the first scan is fast
+        except Exception:
+            log.exception("Failed to initialise attendance service")
+            self._ui(self._show, "Setup error", "Could not load face models", "bad")
             return
 
         if self.service.enrolled_count == 0:
-            self._ui(self._set_banner, "No teachers enrolled yet — use Admin → Teachers", "warn")
+            self._ui(self._show, "No teachers enrolled yet",
+                     "Ask the administrator to register faces", "warn")
         else:
-            self._ui(self._set_banner, "Look at the camera", "idle")
+            self._ui(self._show, "👋 Step up to mark attendance",
+                     "Look directly at the camera", "idle")
 
         state = _State.SCANNING
         challenge: ActiveChallenge | None = None
@@ -164,48 +173,73 @@ class KioskView(ctk.CTkFrame):
             if frame is None:
                 time.sleep(0.05)
                 continue
-
-            if state is _State.SCANNING:
-                result = self.service.identify(frame)
-                if result.status is IdentifyStatus.NO_FACE:
-                    self._ui(self._set_banner, "Look at the camera", "idle")
-                elif result.status is IdentifyStatus.SPOOF:
-                    self._ui(self._set_banner, "⚠ Spoof detected — use a real face", "bad")
-                elif result.status is IdentifyStatus.UNKNOWN:
-                    self._ui(self._set_banner, "Face not recognized", "warn")
-                else:  # RECOGNIZED
-                    candidate = result
-                    if SettingsRepository.get_bool("active_challenge_enabled", True):
-                        challenge = ActiveChallenge()
-                        deadline = time.time() + CHALLENGE_TIMEOUT_S
-                        state = _State.CHALLENGE
-                        self._ui(self._set_banner,
-                                 f"{result.teacher_name}: {challenge.prompt}", "info")
+            try:
+                if state is _State.SCANNING:
+                    candidate, challenge, state, deadline = self._scan(frame)
+                elif state is _State.CHALLENGE:
+                    state, deadline = self._challenge(frame, challenge, candidate, deadline)
+                    if state is _State.SCANNING:
+                        challenge, candidate = None, None
+                elif state is _State.RESULT:
+                    if time.time() > deadline:
+                        state = _State.SCANNING
+                        challenge, candidate = None, None
+                        self._ui(self._show, "👋 Step up to mark attendance",
+                                 "Look directly at the camera", "idle")
                     else:
-                        self._commit(candidate, frame)
-                        state = _State.RESULT
-                        deadline = time.time() + RESULT_HOLD_S
-                time.sleep(SCAN_INTERVAL_S)
+                        time.sleep(0.1)
+            except Exception:
+                log.exception("Kiosk worker iteration failed; recovering")
+                state, challenge, candidate = _State.SCANNING, None, None
+                time.sleep(0.5)
 
-            elif state is _State.CHALLENGE:
-                assert challenge is not None and candidate is not None
-                if challenge.update(frame):
-                    self._commit(candidate, frame)
-                    state = _State.RESULT
-                    deadline = time.time() + RESULT_HOLD_S
-                elif time.time() > deadline:
-                    self._ui(self._set_banner, "Liveness check timed out — try again", "warn")
-                    state = _State.SCANNING
-                    challenge, candidate = None, None
-                    time.sleep(1.0)
+    # ------------------------------------------------------------------
+    def _scan(self, frame):
+        """SCANNING: look for a live, recognized face. Returns next-state tuple."""
+        result = self.service.identify(frame)
+        next_state = _State.SCANNING
+        challenge = None
+        candidate = None
+        deadline = 0.0
 
-            elif state is _State.RESULT:
-                if time.time() > deadline:
-                    state = _State.SCANNING
-                    challenge, candidate = None, None
-                    self._ui(self._set_banner, "Look at the camera", "idle")
-                else:
-                    time.sleep(0.1)
+        if result.status is IdentifyStatus.NO_FACE:
+            self._ui(self._show, "👋 Step up to mark attendance",
+                     "Look directly at the camera", "idle")
+        elif result.status is IdentifyStatus.SPOOF:
+            self._ui(self._show, "Liveness check failed",
+                     "Please use your real face, not a photo or screen", "bad")
+        elif result.status is IdentifyStatus.UNKNOWN:
+            self._ui(self._show, "Face not recognized",
+                     "Please contact the administrator to enroll", "warn")
+        else:  # RECOGNIZED
+            candidate = result
+            if SettingsRepository.get_bool("active_challenge_enabled", True):
+                challenge = ActiveChallenge()
+                deadline = time.time() + CHALLENGE_TIMEOUT_S
+                next_state = _State.CHALLENGE
+                self._ui(self._show, f"Hi {result.teacher_name}!",
+                         f"Please {challenge.prompt} to confirm", "info")
+            else:
+                self._commit(candidate, frame)
+                next_state = _State.RESULT
+                deadline = time.time() + RESULT_HOLD_S
+
+        time.sleep(SCAN_INTERVAL_S)
+        return candidate, challenge, next_state, deadline
+
+    def _challenge(self, frame, challenge, candidate, deadline):
+        """CHALLENGE: verify the active liveness response. Returns (state, deadline)."""
+        if challenge.update(frame):
+            log.info("Liveness passed for %s", candidate.teacher_name)
+            self._commit(candidate, frame)
+            return _State.RESULT, time.time() + RESULT_HOLD_S
+        if time.time() > deadline:
+            log.info("Liveness timed out for %s", candidate.teacher_name)
+            self._ui(self._show, "Let's try again",
+                     "Look at the camera and follow the prompt", "warn")
+            time.sleep(1.2)
+            return _State.SCANNING, 0.0
+        return _State.CHALLENGE, deadline
 
     # ------------------------------------------------------------------
     def _commit(self, candidate, frame) -> None:
@@ -213,12 +247,21 @@ class KioskView(ctk.CTkFrame):
         outcome = self.service.record(
             candidate.teacher_id, frame, candidate.face, liveness
         )
+        name = candidate.teacher_name or "Teacher"
+        now = datetime.now().strftime("%I:%M %p").lstrip("0")
+
         if outcome.status is RecordStatus.DUPLICATE:
-            self._ui(self._set_banner, outcome.message, "warn")
+            self._ui(self._show, "You're already checked in",
+                     f"{name}, you're all set — see you later!", "info")
+            return
+
+        action = "Checked IN" if outcome.check_type == "in" else "Checked OUT"
+        if outcome.late:
+            self._ui(self._show, "✓ Attendance recorded (Late)",
+                     f"{name} · {action} · {now}", "warn")
         else:
-            kind = "warn" if outcome.late else "good"
-            prefix = "✓ " if not outcome.late else "⏱ "
-            self._ui(self._set_banner, prefix + outcome.message, kind)
+            self._ui(self._show, "✓ Attendance recorded",
+                     f"{name} · {action} · {now}", "good")
 
     def _wait_for_frame(self, timeout: float = 3.0):
         end = time.time() + timeout
