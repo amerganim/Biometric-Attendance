@@ -22,3 +22,6 @@ bcrypt>=4,<5
 
 # Excel export
 openpyxl>=3.1,<4
+
+# Cloud sync (Phase 2) — HTTP client for Supabase REST
+requests>=2.31,<3

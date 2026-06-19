@@ -24,6 +24,15 @@ def new_id() -> str:
     return str(uuid.uuid4())
 
 
+def _conn(conn: Optional[sqlite3.Connection] = None) -> sqlite3.Connection:
+    """Return the given connection, or the shared app connection by default.
+
+    The background sync service passes its own dedicated connection so it never
+    shares the single app-wide connection across threads.
+    """
+    return conn if conn is not None else get_connection()
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
@@ -195,6 +204,23 @@ class TeacherRepository:
         raw = row["embedding"]
         return json.loads(raw) if raw else []
 
+    @staticmethod
+    def unsynced(conn: Optional[sqlite3.Connection] = None) -> list[sqlite3.Row]:
+        """Teachers pending upload to the cloud (used by the sync service)."""
+        return _conn(conn).execute(
+            "SELECT * FROM teachers WHERE synced = 0 ORDER BY created_at"
+        ).fetchall()
+
+    @staticmethod
+    def mark_synced(ids: Iterable[str], conn: Optional[sqlite3.Connection] = None) -> None:
+        ids = list(ids)
+        if not ids:
+            return
+        placeholders = ",".join("?" * len(ids))
+        _conn(conn).execute(
+            f"UPDATE teachers SET synced = 1 WHERE id IN ({placeholders})", ids
+        )
+
 
 # ---------------------------------------------------------------------------
 # Attendance
@@ -266,18 +292,18 @@ class AttendanceRepository:
         return get_connection().execute(" ".join(sql), params).fetchall()
 
     @staticmethod
-    def unsynced() -> list[sqlite3.Row]:
-        """Records pending upload — used by Phase 2 sync."""
-        return get_connection().execute(
+    def unsynced(conn: Optional[sqlite3.Connection] = None) -> list[sqlite3.Row]:
+        """Records pending upload — used by the sync service."""
+        return _conn(conn).execute(
             "SELECT * FROM attendance WHERE synced = 0 ORDER BY timestamp"
         ).fetchall()
 
     @staticmethod
-    def mark_synced(ids: Iterable[str]) -> None:
+    def mark_synced(ids: Iterable[str], conn: Optional[sqlite3.Connection] = None) -> None:
         ids = list(ids)
         if not ids:
             return
         placeholders = ",".join("?" * len(ids))
-        get_connection().execute(
+        _conn(conn).execute(
             f"UPDATE attendance SET synced = 1 WHERE id IN ({placeholders})", ids
         )

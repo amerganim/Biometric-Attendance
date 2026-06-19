@@ -227,3 +227,9 @@ data/logs/
 
 # Claude Code local settings (machine-specific)
 .claude/
+
+# --- Phase 2 web dashboard ---
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.env
+dashboard/.env.local

@@ -1,12 +1,14 @@
-"""Settings: work hours, recognition/liveness thresholds, and admin password."""
+"""Settings: work hours, recognition/liveness thresholds, cloud sync, password."""
 from __future__ import annotations
 
+import threading
 from tkinter import messagebox
 
 import customtkinter as ctk
 
 from app.db.repositories import SettingsRepository
 from app.security.auth import change_password
+from app.sync.sync_service import perform_sync
 
 # (key, label, hint)
 _FIELDS = [
@@ -63,6 +65,45 @@ class SettingsView(ctk.CTkFrame):
         ctk.CTkButton(body, text="Save Settings", width=160,
                       command=self._save_settings).pack(anchor="w", pady=(2, 18))
 
+        # --- Cloud sync ---
+        ctk.CTkLabel(body, text="Cloud Sync", font=("", 18, "bold")).pack(
+            anchor="w", pady=(8, 2))
+        ctk.CTkLabel(body, text="Push attendance to Supabase so it can be viewed in the "
+                     "web dashboard. See supabase/README.md for setup.",
+                     text_color="gray60", font=("", 11), justify="left").pack(
+            anchor="w", pady=(0, 8))
+
+        ctk.CTkLabel(body, text="Supabase Project URL", anchor="w").pack(
+            anchor="w", padx=2)
+        self.sb_url = ctk.CTkEntry(body, width=460,
+                                   placeholder_text="https://xxxx.supabase.co")
+        self.sb_url.insert(0, SettingsRepository.get("supabase_url", "") or "")
+        self.sb_url.pack(anchor="w", pady=(0, 6))
+
+        ctk.CTkLabel(body, text="service_role key (kept on this laptop only)",
+                     anchor="w").pack(anchor="w", padx=2)
+        self.sb_key = ctk.CTkEntry(body, width=460, show="•",
+                                   placeholder_text="paste the service_role key")
+        self.sb_key.insert(0, SettingsRepository.get("supabase_service_key", "") or "")
+        self.sb_key.pack(anchor="w", pady=(0, 6))
+
+        self.sync_enabled = ctk.CTkCheckBox(body, text="Enable automatic cloud sync")
+        self.sync_enabled.pack(anchor="w", pady=(4, 4))
+        if SettingsRepository.get_bool("sync_enabled", False):
+            self.sync_enabled.select()
+
+        sync_row = ctk.CTkFrame(body, fg_color="transparent")
+        sync_row.pack(anchor="w", pady=(2, 2), fill="x")
+        ctk.CTkButton(sync_row, text="Save Cloud Settings", width=170,
+                      command=self._save_cloud).pack(side="left")
+        self.sync_now_btn = ctk.CTkButton(sync_row, text="Sync now", width=120,
+                                          command=self._sync_now)
+        self.sync_now_btn.pack(side="left", padx=8)
+
+        last = SettingsRepository.get("last_sync_status", "") or "Never synced"
+        self.sync_status = ctk.CTkLabel(body, text=last, text_color="gray70")
+        self.sync_status.pack(anchor="w", pady=(2, 18))
+
         # --- Change password ---
         ctk.CTkLabel(body, text="Change Admin Password", font=("", 18, "bold")).pack(
             anchor="w", pady=(8, 6))
@@ -85,6 +126,36 @@ class SettingsView(ctk.CTkFrame):
             SettingsRepository.set(key, self.entries[key].get().strip())
         SettingsRepository.set("active_challenge_enabled", "1" if self.challenge.get() else "0")
         self.settings_status.configure(text="Settings saved ✓")
+
+    def _save_cloud(self) -> None:
+        SettingsRepository.set("supabase_url", self.sb_url.get().strip())
+        SettingsRepository.set("supabase_service_key", self.sb_key.get().strip())
+        SettingsRepository.set("sync_enabled", "1" if self.sync_enabled.get() else "0")
+        self.sync_status.configure(text="Cloud settings saved ✓", text_color="#98c379")
+        # Nudge the background scheduler to pick up the new settings immediately.
+        if getattr(self.app, "sync_service", None) is not None:
+            self.app.sync_service.request_sync()
+
+    def _sync_now(self) -> None:
+        # Save first so the sync uses the current field values.
+        self._save_cloud()
+        self.sync_now_btn.configure(state="disabled", text="Syncing…")
+        self.sync_status.configure(text="Syncing…", text_color="gray70")
+
+        def worker():
+            ok, status = perform_sync()
+            color = "#98c379" if ok else "#e06c75"
+
+            def done():
+                self.sync_status.configure(text=status, text_color=color)
+                self.sync_now_btn.configure(state="normal", text="Sync now")
+
+            try:
+                self.after(0, done)
+            except RuntimeError:
+                pass  # view closed
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _change_password(self) -> None:
         old, new, confirm = self.old_pw.get(), self.new_pw.get(), self.confirm_pw.get()

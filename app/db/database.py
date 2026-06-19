@@ -79,6 +79,20 @@ def get_connection() -> sqlite3.Connection:
     return _connection
 
 
+def new_connection() -> sqlite3.Connection:
+    """Open a fresh, independent connection to the same database file.
+
+    Used by the background sync service so it never shares the single app-wide
+    connection across threads. WAL mode (enabled below) lets this connection read
+    and write concurrently with the main one safely.
+    """
+    conn = sqlite3.connect(config.DB_PATH, check_same_thread=False, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute("PRAGMA busy_timeout = 5000;")
+    return conn
+
+
 def init_db() -> None:
     """Create required directories, the schema, and seed defaults.
 

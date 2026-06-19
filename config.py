@@ -38,6 +38,13 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "duplicate_window_minutes": "2",   # ignore repeat scans within this window
     "enroll_frames": "5",              # face frames captured per enrollment
     "active_challenge_enabled": "1",   # 1 = require blink/turn challenge at kiosk
+    # --- Cloud sync (Phase 2; configured in Settings → Cloud Sync) ---
+    "supabase_url": "",                # https://<project>.supabase.co
+    "supabase_service_key": "",        # service_role key (local, trusted device only)
+    "sync_enabled": "0",               # 1 = push to cloud in the background
+    "sync_interval_minutes": "15",     # how often the background sync runs
+    "last_sync_at": "",                # ISO timestamp of last successful sync
+    "last_sync_status": "",            # short human-readable status
 }
 
 # ---------------------------------------------------------------------------

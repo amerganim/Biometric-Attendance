@@ -14,6 +14,7 @@ import customtkinter as ctk
 
 from app.core.camera import Camera
 from app.db.database import close_connection
+from app.sync.sync_service import SyncService
 
 
 class App(ctk.CTk):
@@ -29,6 +30,10 @@ class App(ctk.CTk):
         # Shared resources.
         self.camera = Camera()
         self.current_admin: Optional[str] = None  # username when logged in
+
+        # Background cloud sync (no-op until configured + enabled in Settings).
+        self.sync_service = SyncService()
+        self.sync_service.start()
 
         self._container = ctk.CTkFrame(self, corner_radius=0)
         self._container.pack(fill="both", expand=True)
@@ -120,6 +125,7 @@ class App(ctk.CTk):
             on_hide = getattr(self._current_view, "on_hide", None)
             if callable(on_hide):
                 on_hide()
+        self.sync_service.stop()
         self.camera.stop()
         close_connection()
         self.destroy()
