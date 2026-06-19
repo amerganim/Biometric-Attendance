@@ -228,8 +228,14 @@ class KioskView(ctk.CTkFrame):
         return candidate, challenge, next_state, deadline
 
     def _challenge(self, frame, challenge, candidate, deadline):
-        """CHALLENGE: verify the active liveness response. Returns (state, deadline)."""
-        if challenge.update(frame):
+        """CHALLENGE: verify the active liveness response. Returns (state, deadline).
+
+        Uses insightface keypoints (the detector that recognized the teacher) rather
+        than mediapipe, so liveness works wherever recognition does.
+        """
+        face = self.service.engine.largest_face(frame)
+        kps = face.kps if face is not None else None
+        if challenge.update_kps(kps):
             log.info("Liveness passed for %s (%s)", candidate.teacher_name, challenge.summary())
             self._commit(candidate, frame)
             return _State.RESULT, time.time() + RESULT_HOLD_S
@@ -239,6 +245,7 @@ class KioskView(ctk.CTkFrame):
                      "Look at the camera and follow the prompt", "warn")
             time.sleep(1.2)
             return _State.SCANNING, 0.0
+        time.sleep(0.1)  # ~10 fps detection is plenty and keeps CPU sane
         return _State.CHALLENGE, deadline
 
     # ------------------------------------------------------------------
