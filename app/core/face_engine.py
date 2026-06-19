@@ -57,9 +57,14 @@ class FaceEngine:
                 return
             from insightface.app import FaceAnalysis  # heavy import, deferred
 
+            # Load ONLY the detection + recognition models. We use the bounding
+            # box, 5 keypoints, and embedding — never the 2D/3D landmark or
+            # age/gender models. Skipping them is faster, lighter, and avoids a
+            # landmark-model crash that surfaced in the packaged build.
             app = FaceAnalysis(
                 name=config.INSIGHTFACE_MODEL_PACK,
                 providers=["CPUExecutionProvider"],
+                allowed_modules=["detection", "recognition"],
             )
             app.prepare(ctx_id=-1, det_size=(640, 640))  # ctx_id=-1 -> CPU
             self._app = app

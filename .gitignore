@@ -233,3 +233,7 @@ dashboard/node_modules/
 dashboard/dist/
 dashboard/.env
 dashboard/.env.local
+
+# --- Packaging: keep the spec + scripts, ignore build outputs ---
+!packaging/*.spec
+build_pyinstaller.log

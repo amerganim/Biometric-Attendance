@@ -5,12 +5,18 @@ app works regardless of the current working directory.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-BASE_DIR = Path(__file__).resolve().parent
+# When packaged with PyInstaller, store data next to the executable (a writable,
+# obvious place in the portable folder); otherwise next to this source file.
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 THUMBNAIL_DIR = DATA_DIR / "thumbnails"
 MODELS_DIR = DATA_DIR / "models"          # cached ONNX models (anti-spoof, etc.)
