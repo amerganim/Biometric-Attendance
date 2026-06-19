@@ -101,39 +101,47 @@ class TeacherFormDialog(ctk.CTkToplevel):
         self.teacher = teacher
         self.on_saved = on_saved
         self.title("Edit Teacher" if teacher else "Add Teacher")
-        self.geometry("420x520")
-        self.resizable(False, False)
+        self.geometry("460x600")
+        self.minsize(460, 460)
         # Make it a proper on-top modal. grab_set must wait until the window is
         # actually viewable, otherwise CTkToplevel raises "grab failed: window not
         # viewable" and the dialog never opens.
         self.transient(master.winfo_toplevel())
         self.lift()
         self.after(120, self._make_modal)
+        self.bind("<Escape>", lambda _e: self.destroy())
 
-        ctk.CTkLabel(self, text=self.title(), font=("", 20, "bold")).pack(pady=(20, 10))
+        ctk.CTkLabel(self, text=self.title(), font=("", 20, "bold")).pack(pady=(18, 6))
+
+        # Pin the action bar to the bottom FIRST so the fields can never push the
+        # buttons off-screen (that was the "fields appear but no buttons" bug).
+        buttons = ctk.CTkFrame(self, fg_color="transparent")
+        buttons.pack(side="bottom", pady=(6, 16))
+        ctk.CTkButton(buttons, text="Cancel", width=130, height=40, fg_color="transparent",
+                      border_width=1, command=self.destroy).pack(side="left", padx=8)
+        ctk.CTkButton(buttons, text="Save", width=130, height=40,
+                      command=self._save).pack(side="left", padx=8)
+        self.error = ctk.CTkLabel(self, text="", text_color="#e06c75")
+        self.error.pack(side="bottom", pady=(0, 2))
+
+        # Scrollable field area fills the space between title and buttons.
+        body = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        body.pack(side="top", fill="both", expand=True, padx=6)
 
         self.entries: dict[str, ctk.CTkEntry] = {}
         for key, label in self.FIELDS:
-            ctk.CTkLabel(self, text=label, anchor="w").pack(fill="x", padx=40, pady=(8, 0))
-            entry = ctk.CTkEntry(self, width=340, height=38)
-            entry.pack(padx=40)
+            ctk.CTkLabel(body, text=label, anchor="w").pack(fill="x", padx=30, pady=(8, 0))
+            entry = ctk.CTkEntry(body, height=38)
+            entry.pack(padx=30, fill="x")
             if teacher and teacher[key]:
                 entry.insert(0, teacher[key])
+            entry.bind("<Return>", lambda _e: self._save())
             self.entries[key] = entry
 
-        self.consent = ctk.CTkCheckBox(self, text="Consent form signed")
-        self.consent.pack(padx=40, pady=14, anchor="w")
+        self.consent = ctk.CTkCheckBox(body, text="Consent form signed")
+        self.consent.pack(padx=30, pady=14, anchor="w")
         if teacher and teacher["consent_signed"]:
             self.consent.select()
-
-        self.error = ctk.CTkLabel(self, text="", text_color="#e06c75")
-        self.error.pack()
-
-        buttons = ctk.CTkFrame(self, fg_color="transparent")
-        buttons.pack(pady=10)
-        ctk.CTkButton(buttons, text="Cancel", width=120, fg_color="transparent",
-                      border_width=1, command=self.destroy).pack(side="left", padx=6)
-        ctk.CTkButton(buttons, text="Save", width=120, command=self._save).pack(side="left", padx=6)
 
     def _make_modal(self) -> None:
         try:

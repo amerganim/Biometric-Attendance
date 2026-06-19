@@ -6,6 +6,7 @@ accepted when exactly one sufficiently large, confident face is present.
 """
 from __future__ import annotations
 
+import threading
 import time
 
 import customtkinter as ctk
@@ -94,6 +95,27 @@ class EnrollView(ctk.CTkFrame):
             self.capture_btn.configure(state="disabled")
             return
         self._tick()
+        # Pre-load the face model in the background so the first Capture click is
+        # instant instead of freezing for a few seconds while the model loads.
+        if self.engine._app is None:
+            self.capture_btn.configure(state="disabled", text="Preparing…")
+            self.status.configure(text="Preparing face recognition…", text_color="gray70")
+            threading.Thread(target=self._warmup, daemon=True).start()
+
+    def _warmup(self) -> None:
+        try:
+            self.engine._ensure_loaded()
+        except Exception:
+            pass
+        # Re-enable Capture on the main thread once the model is ready.
+        try:
+            self.after(0, self._on_ready)
+        except RuntimeError:
+            pass  # view destroyed during warmup
+
+    def _on_ready(self) -> None:
+        self.capture_btn.configure(state="normal", text="● Capture")
+        self.status.configure(text="Ready.", text_color="gray70")
 
     def on_hide(self) -> None:
         if self._preview_job is not None:
