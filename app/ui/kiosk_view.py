@@ -262,6 +262,12 @@ class KioskView(ctk.CTkFrame):
                      f"{name}, you're all set — see you later!", "info")
             return
 
+        # New record saved — push it to the cloud right away (if sync is enabled),
+        # instead of waiting for the periodic timer.
+        sync = getattr(self.app, "sync_service", None)
+        if sync is not None:
+            sync.request_sync()
+
         action = "Checked IN" if outcome.check_type == "in" else "Checked OUT"
         if outcome.late:
             self._ui(self._show, "✓ Attendance recorded (Late)",
