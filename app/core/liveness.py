@@ -100,8 +100,8 @@ _LEFT_EYE = [362, 385, 387, 263, 373, 380]
 
 # Blink/turn detection is adaptive (relative to each person), so these are ratios
 # rather than absolute thresholds — far more reliable across cameras and faces.
-BLINK_CLOSE_RATIO = 0.72        # eye counts as "closed" below this fraction of its open size
-MIN_OPEN_EAR = 0.15             # need a plausibly-open eye before a blink can count
+BLINK_CLOSE_RATIO = 0.80        # eye counts as "closed" below this fraction of its open size
+MIN_OPEN_EAR = 0.12             # need a plausibly-open eye before a blink can count
 TURN_DELTA = 0.10               # change in nose-offset that counts as a head turn
 WARMUP_FRAMES = 3               # frames to establish the open-eye / centered baseline
 
@@ -182,17 +182,26 @@ class ActiveChallenge:
         self.type = challenge_type or random.choice(list(ChallengeType))
         self._mesh = _FaceMesh()
         self.passed = False
+        self.how = ""                # which signal passed: "blink" or "turn"
         self.saw_face = False        # True once landmarks have been detected at all
         self._frames = 0
         self._ear_open = 0.0         # running max open-eye EAR (the baseline)
+        self._ear_min = 1.0          # running min EAR seen (diagnostics)
         self._yaw_base: Optional[float] = None
+        self._yaw_dev = 0.0          # largest head-turn deviation seen
 
     @property
     def prompt(self) -> str:
-        return "blink" if self.type is ChallengeType.BLINK else "turn your head"
+        # We accept either signal, so tell the user both options.
+        return "blink or gently turn your head"
 
     def update(self, frame_bgr: np.ndarray) -> bool:
-        """Process one frame; returns True once the challenge has been satisfied."""
+        """Process one frame; returns True once the challenge has been satisfied.
+
+        Accepts EITHER a blink OR a slight head turn — whichever the live person
+        does first — which is far more reliable than insisting on one specific
+        action. A held-up still photo produces neither.
+        """
         if self.passed:
             return True
         landmarks = self._mesh.landmarks(frame_bgr)
@@ -202,26 +211,36 @@ class ActiveChallenge:
         self._frames += 1
 
         try:
-            if self.type is ChallengeType.BLINK:
-                ear = (
-                    eye_aspect_ratio(landmarks, _LEFT_EYE)
-                    + eye_aspect_ratio(landmarks, _RIGHT_EYE)
-                ) / 2.0
-                # Learn the open-eye size, then detect a clear drop (a blink).
-                self._ear_open = max(self._ear_open, ear)
-                if (
-                    self._frames >= WARMUP_FRAMES
-                    and self._ear_open >= MIN_OPEN_EAR
+            ear = (
+                eye_aspect_ratio(landmarks, _LEFT_EYE)
+                + eye_aspect_ratio(landmarks, _RIGHT_EYE)
+            ) / 2.0
+            self._ear_open = max(self._ear_open, ear)
+            self._ear_min = min(self._ear_min, ear)
+
+            ratio = head_turn_ratio(landmarks)
+            if self._yaw_base is None:
+                self._yaw_base = ratio
+            self._yaw_dev = max(self._yaw_dev, abs(ratio - self._yaw_base))
+
+            if self._frames >= WARMUP_FRAMES:
+                blinked = (
+                    self._ear_open >= MIN_OPEN_EAR
                     and ear < BLINK_CLOSE_RATIO * self._ear_open
-                ):
+                )
+                turned = self._yaw_dev >= TURN_DELTA
+                if blinked or turned:
                     self.passed = True
-            else:  # TURN
-                ratio = head_turn_ratio(landmarks)
-                if self._yaw_base is None:
-                    self._yaw_base = ratio
-                if self._frames >= WARMUP_FRAMES and abs(ratio - self._yaw_base) >= TURN_DELTA:
-                    self.passed = True
+                    self.how = "blink" if blinked else "turn"
         except Exception:
             return False
 
         return self.passed
+
+    def summary(self) -> str:
+        """Diagnostic snapshot for the log."""
+        return (
+            f"saw_face={self.saw_face} frames={self._frames} "
+            f"ear_open={self._ear_open:.3f} ear_min={self._ear_min:.3f} "
+            f"yaw_dev={self._yaw_dev:.3f} how={self.how or '-'}"
+        )

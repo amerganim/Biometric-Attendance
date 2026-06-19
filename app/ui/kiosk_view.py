@@ -230,11 +230,11 @@ class KioskView(ctk.CTkFrame):
     def _challenge(self, frame, challenge, candidate, deadline):
         """CHALLENGE: verify the active liveness response. Returns (state, deadline)."""
         if challenge.update(frame):
-            log.info("Liveness passed for %s", candidate.teacher_name)
+            log.info("Liveness passed for %s (%s)", candidate.teacher_name, challenge.summary())
             self._commit(candidate, frame)
             return _State.RESULT, time.time() + RESULT_HOLD_S
         if time.time() > deadline:
-            log.info("Liveness timed out for %s", candidate.teacher_name)
+            log.info("Liveness timed out for %s (%s)", candidate.teacher_name, challenge.summary())
             self._ui(self._show, "Let's try again",
                      "Look at the camera and follow the prompt", "warn")
             time.sleep(1.2)
