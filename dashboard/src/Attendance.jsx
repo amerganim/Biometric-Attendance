@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { exportCsv, exportXlsx } from "./exporters";
+
+const REFRESH_MS = 20000; // auto-refresh interval for a live view
 
 function isoDaysAgo(days) {
   const d = new Date();
@@ -14,7 +16,8 @@ export default function Attendance() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [start, setStart] = useState(isoDaysAgo(30));
+  // Default to today's attendance.
+  const [start, setStart] = useState(isoDaysAgo(0));
   const [end, setEnd] = useState(isoDaysAgo(0));
   const [teacherId, setTeacherId] = useState("");
   const [status, setStatus] = useState("");
@@ -27,8 +30,9 @@ export default function Attendance() {
       .then(({ data }) => setTeachers(data || []));
   }, []);
 
-  async function load() {
-    setLoading(true);
+  // `silent` re-fetches in the background (no "Loading…" flicker) for auto-refresh.
+  async function load(silent = false) {
+    if (!silent) setLoading(true);
     setError("");
     let q = supabase
       .from("attendance")
@@ -43,12 +47,23 @@ export default function Attendance() {
 
     const { data, error } = await q;
     if (error) setError(error.message);
-    setRows(data || []);
-    setLoading(false);
+    else setRows(data || []);
+    if (!silent) setLoading(false);
   }
+
+  // Keep a ref to the latest load() so the polling timer always uses current filters.
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
   useEffect(() => {
     load();
+    const timer = setInterval(() => loadRef.current(true), REFRESH_MS);
+    const onFocus = () => loadRef.current(true);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -105,6 +120,7 @@ export default function Attendance() {
 
       <div className="summary">
         {loading ? "Loading…" : `${rows.length} records · ${lateCount} late`}
+        <span className="live"> · live ●</span>
       </div>
       {error && <div className="error">{error}</div>}
 

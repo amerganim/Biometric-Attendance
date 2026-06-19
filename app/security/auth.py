@@ -38,6 +38,21 @@ def change_password(username: str, old_password: str, new_password: str) -> bool
     return True
 
 
+def has_setup_password() -> bool:
+    """True once a developer/setup password has been configured."""
+    return bool(SettingsRepository.get("setup_password_hash", ""))
+
+
+def set_setup_password(password: str) -> None:
+    """Set (or change) the developer password that locks cloud settings."""
+    SettingsRepository.set("setup_password_hash", hash_password(password))
+
+
+def verify_setup_password(password: str) -> bool:
+    h = SettingsRepository.get("setup_password_hash", "")
+    return bool(h) and verify_password(password, h)
+
+
 def ensure_default_admin() -> None:
     """Seed the default admin + default settings on a fresh database."""
     SettingsRepository.seed_defaults()

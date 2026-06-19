@@ -98,6 +98,7 @@ button.ghost:hover { background: var(--panel-2); }
 .filters .spacer { flex: 1; }
 
 .summary { color: var(--muted); margin: 8px 2px 12px; }
+.live { color: var(--present); font-size: 12px; }
 
 .table-wrap {
   border: 1px solid var(--border);

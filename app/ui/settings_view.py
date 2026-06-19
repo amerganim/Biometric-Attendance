@@ -7,7 +7,12 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from app.db.repositories import SettingsRepository
-from app.security.auth import change_password
+from app.security.auth import (
+    change_password,
+    has_setup_password,
+    set_setup_password,
+    verify_setup_password,
+)
 from app.sync.sync_service import perform_sync
 
 # (key, label, hint)
@@ -66,12 +71,30 @@ class SettingsView(ctk.CTkFrame):
                       command=self._save_settings).pack(anchor="w", pady=(2, 18))
 
         # --- Cloud sync ---
+        # The URL + service key are locked behind a separate "developer password"
+        # so the college admin can't accidentally change them. Locked whenever a
+        # developer password has been set (and not yet unlocked this visit).
+        self._cloud_locked = has_setup_password()
+
         ctk.CTkLabel(body, text="Cloud Sync", font=("", 18, "bold")).pack(
             anchor="w", pady=(8, 2))
         ctk.CTkLabel(body, text="Push attendance to Supabase so it can be viewed in the "
                      "web dashboard. See supabase/README.md for setup.",
                      text_color="gray60", font=("", 11), justify="left").pack(
             anchor="w", pady=(0, 8))
+
+        # Lock status + unlock / set-password controls.
+        lock_row = ctk.CTkFrame(body, fg_color="transparent")
+        lock_row.pack(anchor="w", pady=(0, 8), fill="x")
+        self.lock_label = ctk.CTkLabel(lock_row, text="", font=("", 12))
+        self.lock_label.pack(side="left")
+        self.unlock_btn = ctk.CTkButton(lock_row, text="Unlock", width=90,
+                                        command=self._unlock_cloud)
+        self.unlock_btn.pack(side="left", padx=8)
+        self.devpw_btn = ctk.CTkButton(lock_row, text="Set developer password",
+                                       width=190, fg_color="transparent",
+                                       border_width=1, command=self._set_dev_password)
+        self.devpw_btn.pack(side="left", padx=4)
 
         ctk.CTkLabel(body, text="Supabase Project URL", anchor="w").pack(
             anchor="w", padx=2)
@@ -94,8 +117,10 @@ class SettingsView(ctk.CTkFrame):
 
         sync_row = ctk.CTkFrame(body, fg_color="transparent")
         sync_row.pack(anchor="w", pady=(2, 2), fill="x")
-        ctk.CTkButton(sync_row, text="Save Cloud Settings", width=170,
-                      command=self._save_cloud).pack(side="left")
+        self.save_cloud_btn = ctk.CTkButton(sync_row, text="Save Cloud Settings",
+                                            width=170, command=self._save_cloud)
+        self.save_cloud_btn.pack(side="left")
+        # "Sync now" stays available to the admin even when settings are locked.
         self.sync_now_btn = ctk.CTkButton(sync_row, text="Sync now", width=120,
                                           command=self._sync_now)
         self.sync_now_btn.pack(side="left", padx=8)
@@ -103,6 +128,8 @@ class SettingsView(ctk.CTkFrame):
         last = SettingsRepository.get("last_sync_status", "") or "Never synced"
         self.sync_status = ctk.CTkLabel(body, text=last, text_color="gray70")
         self.sync_status.pack(anchor="w", pady=(2, 18))
+
+        self._apply_cloud_lock()
 
         # --- Change password ---
         ctk.CTkLabel(body, text="Change Admin Password", font=("", 18, "bold")).pack(
@@ -127,7 +154,74 @@ class SettingsView(ctk.CTkFrame):
         SettingsRepository.set("active_challenge_enabled", "1" if self.challenge.get() else "0")
         self.settings_status.configure(text="Settings saved ✓")
 
+    # ------------------------------------------------------------------
+    # Cloud settings lock (developer password)
+    # ------------------------------------------------------------------
+    def _apply_cloud_lock(self) -> None:
+        """Enable/disable the cloud credential fields based on lock state."""
+        editable = not self._cloud_locked
+        state = "normal" if editable else "disabled"
+        self.sb_url.configure(state=state)
+        self.sb_key.configure(state=state)
+        self.save_cloud_btn.configure(state=state)
+        if not has_setup_password():
+            self.lock_label.configure(
+                text="⚠ Not protected — set a developer password before handover",
+                text_color="#e5c07b")
+            self.unlock_btn.configure(state="disabled")
+            self.devpw_btn.configure(text="Set developer password")
+        elif self._cloud_locked:
+            self.lock_label.configure(text="🔒 Locked (developer only)",
+                                      text_color="gray70")
+            self.unlock_btn.configure(state="normal")
+            self.devpw_btn.configure(state="disabled")
+        else:
+            self.lock_label.configure(text="🔓 Unlocked", text_color="#98c379")
+            self.unlock_btn.configure(state="disabled")
+            self.devpw_btn.configure(state="normal", text="Change developer password")
+
+    def _ask_password(self, title: str) -> str | None:
+        dlg = ctk.CTkInputDialog(text=f"{title}:", title="Developer Password")
+        value = dlg.get_input()
+        return value.strip() if value else None
+
+    def _unlock_cloud(self) -> None:
+        pw = self._ask_password("Enter developer password to unlock")
+        if pw is None:
+            return
+        if verify_setup_password(pw):
+            self._cloud_locked = False
+            self._apply_cloud_lock()
+        else:
+            self.sync_status.configure(text="Wrong developer password.",
+                                       text_color="#e06c75")
+
+    def _set_dev_password(self) -> None:
+        # If one already exists, require it before changing.
+        if has_setup_password():
+            current = self._ask_password("Enter CURRENT developer password")
+            if current is None:
+                return
+            if not verify_setup_password(current):
+                self.sync_status.configure(text="Wrong developer password.",
+                                           text_color="#e06c75")
+                return
+        new = self._ask_password("Set a NEW developer password (min 6 chars)")
+        if new is None:
+            return
+        if len(new) < 6:
+            self.sync_status.configure(text="Developer password too short (min 6).",
+                                       text_color="#e06c75")
+            return
+        set_setup_password(new)
+        self._cloud_locked = True  # lock immediately after setting
+        self._apply_cloud_lock()
+        self.sync_status.configure(text="Developer password set — cloud settings locked ✓",
+                                   text_color="#98c379")
+
     def _save_cloud(self) -> None:
+        if self._cloud_locked:
+            return  # guarded; fields are disabled anyway
         SettingsRepository.set("supabase_url", self.sb_url.get().strip())
         SettingsRepository.set("supabase_service_key", self.sb_key.get().strip())
         SettingsRepository.set("sync_enabled", "1" if self.sync_enabled.get() else "0")
