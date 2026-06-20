@@ -66,7 +66,7 @@ class FaceEngine:
                 providers=["CPUExecutionProvider"],
                 allowed_modules=["detection", "recognition"],
             )
-            app.prepare(ctx_id=-1, det_size=(640, 640))  # ctx_id=-1 -> CPU
+            app.prepare(ctx_id=-1, det_size=config.DET_SIZE)  # ctx_id=-1 -> CPU
             self._app = app
 
     # ------------------------------------------------------------------
@@ -95,6 +95,19 @@ class FaceEngine:
         if not faces:
             return None
         return max(faces, key=_bbox_area)
+
+    def largest_face_kps(self, frame_bgr: np.ndarray) -> Optional[np.ndarray]:
+        """Detection-only: the 5 keypoints of the largest face, or None.
+
+        Much faster than ``largest_face`` because it skips the recognition
+        embedding — used for the liveness head-turn check so a normal-speed turn
+        is sampled often enough to register.
+        """
+        self._ensure_loaded()
+        bboxes, kpss = self._app.det_model.detect(frame_bgr, max_num=1, metric="max")
+        if bboxes is None or len(bboxes) == 0:
+            return None
+        return kpss[0]
 
 
 # ---------------------------------------------------------------------------

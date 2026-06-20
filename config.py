@@ -77,3 +77,6 @@ DEFAULT_SETTINGS: dict[str, str] = {
 INSIGHTFACE_MODEL_PACK = "buffalo_l"
 EMBEDDING_DIM = 512
 CAMERA_INDEX = 0
+# Detector input size. Smaller = faster; a kiosk face is close so 480 is plenty.
+# Raise toward (640, 640) if faces farther from the camera are missed.
+DET_SIZE = (480, 480)

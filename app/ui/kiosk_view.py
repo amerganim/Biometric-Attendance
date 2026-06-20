@@ -230,11 +230,11 @@ class KioskView(ctk.CTkFrame):
     def _challenge(self, frame, challenge, candidate, deadline):
         """CHALLENGE: verify the active liveness response. Returns (state, deadline).
 
-        Uses insightface keypoints (the detector that recognized the teacher) rather
-        than mediapipe, so liveness works wherever recognition does.
+        Uses a fast detection-only pass (keypoints only, no recognition embedding)
+        so a normal-speed head turn is sampled often enough to register — no need
+        to move slowly.
         """
-        face = self.service.engine.largest_face(frame)
-        kps = face.kps if face is not None else None
+        kps = self.service.engine.largest_face_kps(frame)
         if challenge.update_kps(kps):
             log.info("Liveness passed for %s (%s)", candidate.teacher_name, challenge.summary())
             self._commit(candidate, frame)
@@ -245,7 +245,7 @@ class KioskView(ctk.CTkFrame):
                      "Look at the camera and follow the prompt", "warn")
             time.sleep(1.2)
             return _State.SCANNING, 0.0
-        time.sleep(0.1)  # ~10 fps detection is plenty and keeps CPU sane
+        time.sleep(0.02)  # detection-only is fast; sample frequently to catch quick turns
         return _State.CHALLENGE, deadline
 
     # ------------------------------------------------------------------
