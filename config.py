@@ -74,7 +74,10 @@ DEFAULT_SETTINGS: dict[str, str] = {
 # Face recognition / vision
 # ---------------------------------------------------------------------------
 # insightface model pack ("buffalo_l" = RetinaFace detector + ArcFace r50 embeddings).
-INSIGHTFACE_MODEL_PACK = "buffalo_l"
+# "buffalo_s" = lighter/faster (MobileFaceNet recognition); "buffalo_l" = more
+# accurate (ArcFace-R50) but slower. Embeddings are model-specific, so changing
+# this requires re-enrolling everyone.
+INSIGHTFACE_MODEL_PACK = "buffalo_s"
 EMBEDDING_DIM = 512
 CAMERA_INDEX = 0
 # Detector input size. Smaller = faster; a kiosk face is close so 480 is plenty.
