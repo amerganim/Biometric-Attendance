@@ -7,10 +7,8 @@ customtkinter==5.2.2
 # Imaging / camera
 pillow>=11,<13
 
-# Face detection + landmarks (blink / head-turn liveness challenge)
-mediapipe==0.10.35
-
 # Face recognition (ArcFace via ONNX) + ONNX runtime for recognition & anti-spoof
+# (liveness now uses insightface keypoints; mediapipe is no longer required)
 insightface==1.0.1
 onnxruntime>=1.27,<2
 

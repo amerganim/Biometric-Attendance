@@ -17,6 +17,23 @@ if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
 else:
     BASE_DIR = Path(__file__).resolve().parent
+
+# Application icon — bundled at the PyInstaller root when frozen, else in packaging/.
+_SRC_DIR = Path(__file__).resolve().parent
+
+
+def _find_icon() -> str | None:
+    candidates = [
+        Path(getattr(sys, "_MEIPASS", _SRC_DIR)) / "icon.ico",  # frozen bundle
+        _SRC_DIR / "packaging" / "icon.ico",                     # running from source
+    ]
+    for path in candidates:
+        if path.exists():
+            return str(path)
+    return None
+
+
+ICON_PATH = _find_icon()
 DATA_DIR = BASE_DIR / "data"
 THUMBNAIL_DIR = DATA_DIR / "thumbnails"
 MODELS_DIR = DATA_DIR / "models"          # cached ONNX models (anti-spoof, etc.)

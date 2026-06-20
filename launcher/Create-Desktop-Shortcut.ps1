@@ -20,7 +20,8 @@ $sc = $shell.CreateShortcut($lnkPath)
 $sc.TargetPath = "$env:WINDIR\System32\wscript.exe"
 $sc.Arguments = "`"$launcher`""
 $sc.WorkingDirectory = $root
-$sc.IconLocation = "$pythonw, 0"
+$icon = Join-Path $root "packaging\icon.ico"
+if (Test-Path $icon) { $sc.IconLocation = $icon } else { $sc.IconLocation = "$pythonw, 0" }
 $sc.Description = "Biometric Attendance"
 $sc.Save()
 

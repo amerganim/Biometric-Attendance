@@ -29,6 +29,9 @@ for pkg in ("customtkinter", "insightface", "onnxruntime", "skimage", "scipy", "
 hiddenimports += collect_submodules("insightface")
 hiddenimports += ["bcrypt", "requests", "openpyxl", "PIL.ImageTk"]
 
+ICON = os.path.join(ROOT, "packaging", "icon.ico")
+datas += [(ICON, ".")]  # available at runtime for the window icon
+
 a = Analysis(
     [os.path.join(ROOT, "main.py")],
     pathex=[ROOT],
@@ -55,6 +58,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,  # windowed app, no console window
+    icon=ICON,
 )
 
 coll = COLLECT(

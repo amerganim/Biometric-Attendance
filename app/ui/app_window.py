@@ -12,6 +12,7 @@ from typing import Callable, Optional
 
 import customtkinter as ctk
 
+import config
 from app.core.camera import Camera
 from app.db.database import close_connection
 from app.sync.sync_service import SyncService
@@ -26,6 +27,13 @@ class App(ctk.CTk):
         self.title("Biometric Attendance")
         self.geometry("1120x720")
         self.minsize(940, 620)
+        if config.ICON_PATH:
+            # CTk re-applies its own icon shortly after creation, so set ours after.
+            try:
+                self.iconbitmap(config.ICON_PATH)
+                self.after(300, lambda: self.iconbitmap(config.ICON_PATH))
+            except Exception:
+                pass
 
         # Shared resources.
         self.camera = Camera()
