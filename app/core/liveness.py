@@ -24,9 +24,14 @@ import numpy as np
 import config
 
 # ---------------------------------------------------------------------------
-# Passive anti-spoof (ONNX, optional)
+# Passive anti-spoof (MiniVision Silent-Face, ONNX) — bundled, optional.
 # ---------------------------------------------------------------------------
-ANTISPOOF_MODEL_PATH = config.MODELS_DIR / "antispoof.onnx"
+# Two models ensembled exactly like MiniVision: each takes the face crop expanded
+# by its own scale, resized to 80x80 (BGR, raw 0-255 floats — MiniVision does NOT
+# divide by 255), outputting a 3-class softmax where class 1 = "real". We average
+# the real-probability of both models.
+_ANTISPOOF_MODELS = (("antispoof_2_7.onnx", 2.7), ("antispoof_4_0.onnx", 4.0))
+_ANTISPOOF_INPUT = 80
 
 
 @dataclass
@@ -35,53 +40,79 @@ class PassiveResult:
     available: bool       # False when no model is installed (score is neutral)
 
 
+def _crop_for_antispoof(img: np.ndarray, bbox, scale: float, out_size: int) -> np.ndarray:
+    """Replicate MiniVision's CropImage: a centered crop expanded by ``scale`` and
+    clamped to the image, resized to ``out_size`` square. ``bbox`` is [x, y, w, h];
+    BGR is kept (the model was trained on BGR)."""
+    import cv2
+
+    src_h, src_w = img.shape[:2]
+    x, y, w, h = bbox
+    if w <= 0 or h <= 0:
+        return cv2.resize(img, (out_size, out_size))
+    scale = min((src_h - 1) / h, (src_w - 1) / w, scale)
+    new_w, new_h = w * scale, h * scale
+    cx, cy = x + w / 2.0, y + h / 2.0
+    ltx, lty = cx - new_w / 2.0, cy - new_h / 2.0
+    rbx, rby = cx + new_w / 2.0, cy + new_h / 2.0
+    if ltx < 0:
+        rbx -= ltx; ltx = 0
+    if lty < 0:
+        rby -= lty; lty = 0
+    if rbx > src_w - 1:
+        ltx -= rbx - src_w + 1; rbx = src_w - 1
+    if rby > src_h - 1:
+        lty -= rby - src_h + 1; rby = src_h - 1
+    crop = img[int(lty):int(rby) + 1, int(ltx):int(rbx) + 1]
+    if crop.size == 0:
+        return cv2.resize(img, (out_size, out_size))
+    return cv2.resize(crop, (out_size, out_size))
+
+
 class PassiveLiveness:
-    """Runs a Silent-Face-style ONNX anti-spoof model if one is installed."""
+    """MiniVision Silent-Face anti-spoof ensemble (ONNX). Degrades gracefully to
+    'unavailable' (neutral score) if the model files aren't present."""
 
     def __init__(self) -> None:
-        self._session = None
-        self._input_name: Optional[str] = None
-        self._input_size = (80, 80)
+        self._sessions: list = []   # (session, input_name, scale)
         self._tried = False
 
     def _ensure_loaded(self) -> bool:
         if self._tried:
-            return self._session is not None
+            return bool(self._sessions)
         self._tried = True
-        if not ANTISPOOF_MODEL_PATH.exists():
-            return False
         try:
             import onnxruntime as ort
+        except Exception:
+            return False
+        for name, scale in _ANTISPOOF_MODELS:
+            path = config.antispoof_model_path(name)
+            if not path:
+                continue
+            try:
+                sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+                self._sessions.append((sess, sess.get_inputs()[0].name, scale))
+            except Exception:
+                pass
+        return bool(self._sessions)
 
-            self._session = ort.InferenceSession(
-                str(ANTISPOOF_MODEL_PATH), providers=["CPUExecutionProvider"]
-            )
-            inp = self._session.get_inputs()[0]
-            self._input_name = inp.name
-            # NCHW: grab H, W if statically shaped.
-            shape = inp.shape
-            if len(shape) == 4 and isinstance(shape[2], int) and isinstance(shape[3], int):
-                self._input_size = (shape[3], shape[2])
-        except Exception:  # pragma: no cover - model/runtime issues shouldn't crash UI
-            self._session = None
-        return self._session is not None
-
-    def score(self, face_bgr: np.ndarray) -> PassiveResult:
-        """Score a cropped BGR face image as real (1.0) vs spoof (0.0)."""
+    def score(self, frame_bgr: np.ndarray, bbox) -> PassiveResult:
+        """Score the face at ``bbox`` (x1, y1, x2, y2) in the full frame as real."""
         if not self._ensure_loaded():
             return PassiveResult(score=1.0, available=False)
         try:
-            import cv2
-
-            img = cv2.resize(face_bgr, self._input_size)
-            img = img.astype(np.float32) / 255.0
-            blob = np.transpose(img, (2, 0, 1))[np.newaxis, ...]  # NCHW
-            out = self._session.run(None, {self._input_name: blob})[0]
-            probs = _softmax(np.asarray(out).ravel())
-            # Convention: last class = "real". Falls back to max if 2-class.
-            real_score = float(probs[-1]) if probs.size >= 2 else float(probs[0])
-            return PassiveResult(score=real_score, available=True)
-        except Exception:  # pragma: no cover
+            x1, y1, x2, y2 = (int(v) for v in bbox[:4])
+            mv_bbox = [x1, y1, x2 - x1, y2 - y1]
+            total = 0.0
+            for sess, input_name, scale in self._sessions:
+                crop = _crop_for_antispoof(frame_bgr, mv_bbox, scale, _ANTISPOOF_INPUT)
+                # MiniVision feeds raw 0-255 floats (no /255 normalization).
+                blob = crop.transpose(2, 0, 1)[np.newaxis, ...].astype(np.float32)
+                out = sess.run(None, {input_name: blob})[0]
+                probs = _softmax(np.asarray(out).ravel())
+                total += float(probs[1])  # class 1 = real
+            return PassiveResult(score=total / len(self._sessions), available=True)
+        except Exception:
             return PassiveResult(score=1.0, available=False)
 
 

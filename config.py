@@ -34,6 +34,23 @@ def _find_icon() -> str | None:
 
 
 ICON_PATH = _find_icon()
+
+
+def antispoof_model_path(name: str) -> str | None:
+    """Resolve a bundled passive anti-spoof ONNX model by filename.
+
+    Order: a user override in data/models/, then the bundled copy (frozen, then
+    source). Returns None if not found (passive anti-spoof then stays disabled).
+    """
+    candidates = [
+        MODELS_DIR / name,
+        Path(getattr(sys, "_MEIPASS", _SRC_DIR)) / "app" / "assets" / name,
+        _SRC_DIR / "app" / "assets" / name,
+    ]
+    for path in candidates:
+        if path.exists():
+            return str(path)
+    return None
 DATA_DIR = BASE_DIR / "data"
 THUMBNAIL_DIR = DATA_DIR / "thumbnails"
 MODELS_DIR = DATA_DIR / "models"          # cached ONNX models (anti-spoof, etc.)

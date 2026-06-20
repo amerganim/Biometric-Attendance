@@ -74,11 +74,15 @@ self-hoster secures their own backend keys on their own machine.
 
 ## Anti-spoofing
 
-- **Active challenge (on):** the kiosk asks the person to blink or turn their head,
-  verified from the face detector's keypoints — defeats a held-up photo.
-- **Passive anti-spoof (optional):** drop a Silent-Face-style ONNX model at
-  `data/models/antispoof.onnx` to also reject printed photos / phone screens with no
-  user action (`liveness_threshold` controls strictness).
+- **Passive anti-spoof (on, bundled):** a MiniVision Silent-Face ONNX ensemble
+  scores each face as real vs a printed photo / phone screen with no user action.
+  Tune strictness with `liveness_threshold` (higher = stricter). Models + attribution
+  in [`app/assets/`](app/assets/) (Apache-2.0).
+- **Active challenge (on):** the kiosk also asks the person to blink or turn their
+  head, verified from the face detector's keypoints.
+
+Together these are two independent layers — a held-up photo fails the passive check
+instantly, and a video replay fails the random active prompt.
 
 Every check-in also saves an audit thumbnail under `data/thumbnails/`.
 

@@ -32,6 +32,12 @@ hiddenimports += ["bcrypt", "requests", "openpyxl", "PIL.ImageTk"]
 ICON = os.path.join(ROOT, "packaging", "icon.ico")
 datas += [(ICON, ".")]  # available at runtime for the window icon
 
+# Bundle the passive anti-spoof ONNX models (if present).
+for _m in ("antispoof_2_7.onnx", "antispoof_4_0.onnx"):
+    _p = os.path.join(ROOT, "app", "assets", _m)
+    if os.path.exists(_p):
+        datas += [(_p, os.path.join("app", "assets"))]
+
 a = Analysis(
     [os.path.join(ROOT, "main.py")],
     pathex=[ROOT],
@@ -41,7 +47,7 @@ a = Analysis(
     hookspath=[],
     runtime_hooks=[],
     # mediapipe is unused now; matplotlib/pytest pulled transitively but not needed.
-    excludes=["mediapipe", "matplotlib", "pytest", "tkinter.test"],
+    excludes=["mediapipe", "matplotlib", "pytest", "tkinter.test", "torch", "torchvision"],
     noarchive=False,
 )
 

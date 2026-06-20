@@ -94,8 +94,7 @@ class AttendanceService:
             return IdentifyResult(status=IdentifyStatus.NO_FACE)
 
         liveness_threshold = SettingsRepository.get_float("liveness_threshold", 0.5)
-        crop = images.crop_face(frame_bgr, face.bbox)
-        passive = self.passive.score(crop)
+        passive = self.passive.score(frame_bgr, face.bbox)
         if passive.available and passive.score < liveness_threshold:
             return IdentifyResult(status=IdentifyStatus.SPOOF, face=face, passive=passive)
 
