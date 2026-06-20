@@ -33,6 +33,12 @@ Authentication, and you'll see attendance and teachers.
 
 ## Build / deploy (free)
 
+One-click deploy to Vercel (set Root Directory = `dashboard`, then add the two env vars):
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/amerganim/Biometric-Attendance&root-directory=dashboard&env=VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY)
+
+Or build it yourself:
+
 ```bash
 npm run build      # outputs static files to dist/
 ```
